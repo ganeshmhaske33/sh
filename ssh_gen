@@ -1,0 +1,144 @@
+#!/bin/bash
+##
+## set -x
+##
+user="$1"
+key_path="$2"
+copy_ser_inp="$3"
+old_key_path="$4"
+##
+: '
+user="ganesh"
+key_path="/tmp/key"
+copy_ser_inp="/home/ganesh/inp.txt"
+old_key_path="/tmp/key.pub.old"
+'
+##
+function logs()
+    {
+    ##
+    s=$1
+    msg=$2
+    err=$3
+    ##
+    if [ "$s" -eq "0" ]; then 
+        echo -e "\033[01;32mMESSAGE : $msg \033[00m"
+    elif [ "$s" -gt "0" ]; then 
+        echo -e "\033[01;31mERROR : $err \033[00m"
+    fi
+    ##
+    }
+##
+function remove_old_key()
+    {
+    ##
+    key=`cat $old_key_path 2> /dev/null | cut -d ' ' -f 2`
+    ##
+    if [ "$key" == "" ]; then 
+        key="null_key"
+    fi
+    cmd="/bin/grep -v '$key'  ~\$user/.ssh/authorized_keys > ~\$user/.ssh/authorized_keys.new 2> /dev/null &&"
+    cmd=$cmd" /bin/mv ~\$user/.ssh/authorized_keys ~\$user/.ssh/authorized_keys.old 2> /dev/null;"
+    cmd=$cmd" /bin/mv ~\$user/.ssh/authorized_keys.new ~\$user/.ssh/authorized_keys 2> /dev/null; exit"
+    ##
+    exp_del="/tmp/exp_del_id"
+    ##
+    rm -rf $exp_del 2> /dev/null
+    ##
+    echo "#!/usr/bin/expect -f" >> $exp_del
+    ##
+    echo 'set host [lindex $argv 0]' >> $exp_del
+    echo 'set user [lindex $argv 1]' >> $exp_del
+    echo 'set pass [lindex $argv 2]' >> $exp_del
+    ##
+    echo 'set timeout 30' >> $exp_del
+    echo "spawn /usr/bin/ssh \$user@\$host -o StrictHostKeyChecking=no -o PubkeyAuthentication=no \"$cmd\"" >> $exp_del
+    echo "expect \"\$user@\$host's password:\"" >> $exp_del
+    echo "send \"\$pass\\r\"" >> $exp_del
+    echo "expect eof" >> $exp_del
+    ##
+    chmod 755 $exp_del
+    ##
+    }
+##
+function make_exp_update_id()
+    {
+    ##
+    exp_sh="/tmp/exp_update_id"
+    ##
+    rm -rf $exp_sh 2> /dev/null
+    ##
+    echo "#!/usr/bin/expect -f" >> $exp_sh
+    ##
+    echo 'set host [lindex $argv 0]' >> $exp_sh
+    echo 'set user [lindex $argv 1]' >> $exp_sh
+    echo 'set pass [lindex $argv 2]' >> $exp_sh
+    echo 'set key  [lindex $argv 3]' >> $exp_sh
+    ##
+    echo 'set timeout 30' >> $exp_sh
+    echo 'spawn /usr/bin/ssh-copy-id -f -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -i $key $user@$host' >> $exp_sh
+    echo "expect \"\$user@\$host's password:\"" >> $exp_sh
+    echo "send \"\$pass\\r\"" >> $exp_sh
+    echo "expect eof" >> $exp_sh
+    ##
+    chmod 755 $exp_sh
+    ##
+    }
+##
+function update_id()
+    {
+    ##
+    cd /tmp
+    ##
+    for i in `cat $copy_ser_inp`
+        do
+            ## echo $i
+            ##
+            h=`echo $i | cut -d : -f 1`
+            u=`echo $i | cut -d : -f 2`
+            p=`echo $i | cut -d : -f 3`
+            ##
+            if [ "$old_key_path" != "" ]; then 
+                ##
+                ./exp_del_id  "$h" "$u" "$p"
+                sleep 5
+                ##
+            fi
+            ##
+            ./exp_update_id "$h" "$u" "$p" "$key_path"
+            logs "0" "[ $key_path ] public key is copy for $u@$h" ""
+            ##
+            sleep 5
+        done
+    ##
+    rm /tmp/exp_del_id /tmp/exp_update_id &> /dev/null
+    cp /tmp/key.pub /tmp/key.pub.old
+    ##
+    }
+##
+function gen_key()
+    {
+    ##
+    if [ ! -f "$key_path"  ]; then 
+        ##
+        sudo -u $user ssh-keygen -f $key_path  -t rsa -N ''
+        ex=$?
+        ##
+        logs "$ex" "[ $key_path ] is created successfully." "Unable to create key file at [ $key_path ]."
+        ##
+    else
+        logs "1" "" "[ $key_path ] file is exist. further process is aborted."
+        exit 1;
+    fi
+    ## 
+    }
+##
+gen_key "$user" "$key_path"
+##
+if [ "$old_key_path" != "" ]; then 
+    remove_old_key
+fi
+##
+make_exp_update_id
+##
+update_id 
